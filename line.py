@@ -13,10 +13,15 @@ from threading import Condition, Thread
 import RPi.GPIO as GPIO
 import subprocess
 
+# GPIO setup
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(9, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(13, GPIO.OUT)  # GPIO 13 for PWM output
+pwm = GPIO.PWM(13, 10000)  # Set frequency to 10 kHz
+pwm.start(0)  # Start with 0% duty cycle
 
+# Streaming Output Class
 class StreamingOutput(io.BufferedIOBase):
     def __init__(self):
         self.frame = None
@@ -27,6 +32,7 @@ class StreamingOutput(io.BufferedIOBase):
             self.frame = buf
             self.condition.notify_all()
 
+# GPIO Shutdown Thread
 class GPIOShutdownThread(Thread):
     def run(self):
         while True:
@@ -34,11 +40,12 @@ class GPIOShutdownThread(Thread):
                 print("Shutdown button pressed. Shutting down...")
                 subprocess.run(["sudo", "shutdown", "now"])
 
+# Main Application Class
 class CameraApp(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Configure camera for lower resolution (320x240) to speed up processing
+        # Optimize camera configuration for better performance
         self.picam2 = Picamera2()
         self.picam2.configure(self.picam2.create_video_configuration(main={"size": (320, 240)}))
         self.output = StreamingOutput()
@@ -47,28 +54,26 @@ class CameraApp(QMainWindow):
         self.setWindowTitle("Camera Preview with GPIO Controls")
         self.setGeometry(100, 100, 640, 480)
 
-        # Camera display area
+        # UI Elements
         self.image_label = QLabel(self)
         self.image_label.setScaledContents(True)
 
-        # Displacement calculation time display
         self.displacement_label = QLabel("Displacement calculation time: 0 ms", self)
 
-        # Capture button
         self.capture_button = QPushButton("Capture Image", self)
         self.capture_button.clicked.connect(self.capture_image)
 
-        # Layouts
+        # Layout
         layout = QVBoxLayout()
         layout.addWidget(self.image_label)
-        layout.addWidget(self.displacement_label)  # Add the displacement time label
-        layout.addWidget(self.capture_button)  # Add the capture button
+        layout.addWidget(self.displacement_label)
+        layout.addWidget(self.capture_button)
 
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
 
-        # Timers for updating the image and checking GPIO
+        # Timers
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(30)
@@ -82,9 +87,13 @@ class CameraApp(QMainWindow):
         self.capture_timer.timeout.connect(self.check_gpio_9)
         self.capture_timer.start(100)
 
-        # Limit the number of features in ORB for faster computation
-        self.orb = cv2.ORB_create(nfeatures=300)  # Limiting features
+        # ORB Configuration
+        self.orb = cv2.ORB_create(nfeatures=300)
 
+        # Preallocate memory for smoother performance
+        self.current_image = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    # Update Frame for Display
     def update_frame(self):
         with self.output.condition:
             self.output.condition.wait()
@@ -101,38 +110,44 @@ class CameraApp(QMainWindow):
             self.image_label.setPixmap(QPixmap.fromImage(qimage))
             self.current_image = frame
 
+    # Check GPIO Button 9
     def check_gpio_9(self):
         if GPIO.input(9) == GPIO.HIGH:
             start_time = time.time()
             while GPIO.input(9) == GPIO.HIGH:
                 if (time.time() - start_time) > 1.0:
                     return
-
             self.capture_image()
 
+    # Capture Image and Calculate Displacement
     def capture_image(self):
         current_image = self.current_image.copy()
         if self.background_image is not None:
             start_time = time.time()
             dx, dy = self.calculate_displacement(self.background_image, current_image)
-            displacement_time = (time.time() - start_time) * 1000  # Convert to ms
+            displacement_time = (time.time() - start_time) * 1000
             self.displacement_label.setText(f"Displacement calculation time: {displacement_time:.2f} ms")
             print(f"Displacement: ΔX = {dx:.2f} cm, ΔY = {dy:.2f} cm")
 
+            # Calculate duty cycle based on displacement
+            error = np.sqrt(dx**2 + dy**2) * 10  # Convert to mm
+            duty_cycle = np.clip((error + 10) * 5, 0, 100)  # Scale to 0-100%
+            pwm.ChangeDutyCycle(duty_cycle)
+
         self.background_image = current_image
 
+    # Displacement Calculation
     def calculate_displacement(self, img1, img2):
         gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
-        # Feature detection using ORB
         kp1, des1 = self.orb.detectAndCompute(gray1, None)
         kp2, des2 = self.orb.detectAndCompute(gray2, None)
 
         if des1 is None or des2 is None:
             return 0, 0
 
-        # Using FLANN for faster matching
+        # Match Features with FLANN
         index_params = dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1)
         search_params = dict(checks=50)
         bf = cv2.FlannBasedMatcher(index_params, search_params)
@@ -149,12 +164,10 @@ class CameraApp(QMainWindow):
         else:
             return 0, 0
 
-    def is_frame_significantly_different(self, img1, img2, threshold=50):
-        diff = cv2.absdiff(img1, img2)
-        non_zero_count = np.count_nonzero(diff)
-        return non_zero_count > threshold
-
+    # Close Event Cleanup
     def closeEvent(self, event):
+        pwm.stop()
+        GPIO.cleanup()
         self.picam2.stop_recording()
         event.accept()
 
