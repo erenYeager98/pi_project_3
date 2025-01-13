@@ -126,10 +126,12 @@ class CameraApp(QMainWindow):
 
     def check_gpio(self):
         if GPIO.input(9) == GPIO.HIGH:
-            self.reset_overlay()
+
             self.capture_image()
             
     def capture_image(self):
+        self.reset_overlay()
+        self.update_frame()  # Force a frame update to clear the old overlay
         self.background_image = self.current_image.copy()
         self.overlay_image = self.background_image.copy()
         print("Image Captured and Overlay Applied")
