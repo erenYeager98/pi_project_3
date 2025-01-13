@@ -2,7 +2,6 @@ import sys
 import time
 import numpy as np
 import cv2
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWidget, QPushButton
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import QTimer, QThread, pyqtSignal
@@ -45,7 +44,6 @@ class DisplacementThread(QThread):
 
     def run(self):
         while self.running:
-            time.sleep(2)  # Run every 2 seconds
             if self.camera_app.background_image is not None:
                 start_time = time.time()
                 dx, dy = self.camera_app.calculate_displacement(
@@ -74,15 +72,14 @@ class CameraApp(QMainWindow):
         # UI Elements
         self.image_label = QLabel(self)
         self.image_label.setScaledContents(True)
-        self.displacement_label = QLabel("Displacement: ΔX = 0 cm, ΔY = 0 cm", self)
-        self.displacement_label.setAlignment(Qt.AlignCenter)
-        # self.capture_button = QPushButton("Capture Image", self)
-        # self.capture_button.clicked.connect(self.capture_image)
+        self.displacement_label = QLabel("Displacement: ΔX = 0 mm, ΔY = 0 mm", self)
+        self.capture_button = QPushButton("Capture Image", self)
+        self.capture_button.clicked.connect(self.capture_image)
 
         layout = QVBoxLayout()
         layout.addWidget(self.image_label)
         layout.addWidget(self.displacement_label)
-        # layout.addWidget(self.capture_button)
+        layout.addWidget(self.capture_button)
 
         container = QWidget()
         container.setLayout(layout)
@@ -126,9 +123,13 @@ class CameraApp(QMainWindow):
 
     def check_gpio(self):
         if GPIO.input(9) == GPIO.HIGH:
-
             self.capture_image()
-            
+        elif GPIO.input(17) == GPIO.HIGH:
+            self.shutdown_pi()
+    
+    def shutdown_pi(self):
+        subprocess.run(['sudo', 'shutdown', 'now'])
+
     def capture_image(self):
         self.reset_overlay()
         self.update_frame()  # Force a frame update to clear the old overlay
@@ -136,14 +137,28 @@ class CameraApp(QMainWindow):
         self.overlay_image = self.background_image.copy()
         print("Image Captured and Overlay Applied")
 
+
     def reset_overlay(self):
         self.overlay_image = None
         self.background_image = None
         print("Overlay and Effects Reset")
-        self.displacement_label.setText("Displacement: ΔX = 0 cm, ΔY = 0 cm")
+        self.displacement_label.setText("Displacement: ΔX = 0 mm, ΔY = 0 mm")
 
     def update_displacement_ui(self, dx, dy):
-        self.displacement_label.setText(f"Displacement: ΔX = {dx:.2f} cm, ΔY = {dy:.2f} cm")
+        self.displacement_label.setText(f"Displacement: ΔX = {dx:.2f} mm, ΔY = {dy:.2f} mm")
+        self.update_pwm(dx, dy)
+
+    def update_pwm(self, dx, dy):
+        # Using dy (vertical displacement) for PWM duty cycle calculation
+        if dy <= -10:
+            duty_cycle = 0
+        elif dy >= 10:
+            duty_cycle = 100
+        else:
+            duty_cycle = (dy + 10) * 5  # Linear scaling: -10 mm = 0%, 10 mm = 100%
+
+        pwm.ChangeDutyCycle(duty_cycle)
+        print(f"PWM Duty Cycle: {duty_cycle}%")
 
     def calculate_displacement(self, img1, img2):
         gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
@@ -162,8 +177,8 @@ class CameraApp(QMainWindow):
             src_pts = np.float32([kp1[m.queryIdx].pt for m in matches])
             dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches])
             displacement = np.mean(dst_pts - src_pts, axis=0)
-            pixel_to_cm = 0.05
-            return displacement[0] * pixel_to_cm, displacement[1] * pixel_to_cm
+            pixel_to_mm = 0.5  # Adjust this scale based on your camera's calibration
+            return displacement[0] * pixel_to_mm, displacement[1] * pixel_to_mm
         else:
             return 0, 0
 
