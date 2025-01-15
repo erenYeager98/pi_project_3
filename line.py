@@ -187,10 +187,10 @@ class CameraApp(QMainWindow):
                 dx, dy = displacement
 
                 pixel_to_mm_factor = 0.5
-                dx_cm = dx * pixel_to_mm_factor
-                dy_cm = dy * pixel_to_mm_factor
+                dx_mm = dx * pixel_to_mm_factor
+                dy_mm = dy * pixel_to_mm_factor
 
-                return dx_cm, dy_cm
+                return dx_mm, dy_mm
             else:
                 return None, None
         else:
