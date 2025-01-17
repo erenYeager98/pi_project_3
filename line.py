@@ -183,8 +183,13 @@ class CameraApp(QMainWindow):
                 src_pts = np.float32([kp1[m.queryIdx].pt for m in matches])
                 dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches])
 
-                displacement = np.mean(dst_pts - src_pts, axis=0)
-                dx, dy = displacement
+                displacement_vectors = dst_pts - src_pts
+                filtered_displacement = []
+
+                for i in range(displacement_vectors.shape[1]):
+                    filtered_displacement.append(np.median(displacement_vectors[:, i]))
+
+                dx, dy = filtered_displacement
 
                 pixel_to_mm_factor = 0.5
                 dx_mm = dx * pixel_to_mm_factor
@@ -195,6 +200,7 @@ class CameraApp(QMainWindow):
                 return None, None
         else:
             return None, None
+
 
     def closeEvent(self, event):
         pwm.stop()
