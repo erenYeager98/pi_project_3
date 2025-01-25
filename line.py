@@ -60,7 +60,7 @@ class CameraApp(QMainWindow):
         self.picam2.configure(self.picam2.create_video_configuration(main={"size": (320, 240)}))
         self.output = StreamingOutput()
         self.picam2.start_recording(JpegEncoder(), FileOutput(self.output))
-        self.shift_threshold_cm = 1.0  
+        self.threshold_in_mm = 1.0  
         self.previous_dx_mm = 0.0
         self.previous_dy_mm = 0.0
         self.setWindowTitle("App")
@@ -189,12 +189,12 @@ class CameraApp(QMainWindow):
                     dx_mm = dx * pixel_to_mm_factor
                     dy_mm = dy * pixel_to_mm_factor
 
-                    if abs(dx_mm - self.previous_dx_mm) >= self.shift_threshold_cm:
+                    if abs(dx_mm - self.previous_dx_mm) >= self.threshold_in_mm:
                         self.previous_dx_mm = dx_mm
                     else:
                         dx_mm = self.previous_dx_mm
 
-                    if abs(dy_mm - self.previous_dy_mm) >= self.shift_threshold_cm:
+                    if abs(dy_mm - self.previous_dy_mm) >= self.threshold_in_mm:
                         self.previous_dy_mm = dy_mm
                     else:
                         dy_mm = self.previous_dy_mm
